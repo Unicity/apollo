@@ -146,6 +146,21 @@ void printBlock(char* fileString, block *blocks, int blockIndex){
   printf("%.*s\n", blocks[blockIndex].fileEnd - blocks[blockIndex].fileStart, fileString + blocks[blockIndex].fileStart);
 }
 
+int hash(char* string, int len){
+  int hashAddress = 5381;
+  for (int counter = 0; counter < len; counter++){
+      hashAddress = ((hashAddress << 5) + hashAddress) + string[counter];
+  }
+  return hashAddress % TOTAL_BLOCK_STORAGE;
+}
+
+void markRequestPrinted(bool *table, char* id, int idLength){
+  table[hash(id, idLength)] = 1;
+}
+
+bool isRequestPrinted(bool *table, char *id, int idLength){
+  return table[hash(id, idLength)];
+}
 
 int main(int argc, char* argv[]){
 
@@ -221,30 +236,35 @@ int main(int argc, char* argv[]){
 
   }
   int occurences = 0;
+  bool requestsPrinted[TOTAL_BLOCK_STORAGE] = {0};
   for(int blockIndex = 0; blockIndex < blockCount; blockIndex++){
     char *stringStart = &fileString[blocks[blockIndex].fileStart];
     int blockLength = blocks[blockIndex].fileEnd - blocks[blockIndex].fileStart;
     if(sstrnstr(stringStart, searchPattern, blockLength)){
-      printf("------ REQUEST --------\n");
+      if(!isRequestPrinted(requestsPrinted, fileString + blocks[blockIndex].idStart, blocks[blockIndex].idLength)){
+        printf("------ REQUEST --------\n");
 
-      int startIndex = blockIndex - 100;
-      int endIndex = blockIndex + 100;
-      occurences++;
-      if(startIndex < 0){
-        startIndex = 0;
-      }
-      if(endIndex == blockCount){
-        endIndex = blockCount;
-      }
-      for(int bIndex = startIndex; bIndex < endIndex; bIndex++){
-        if(bIndex != blockIndex){
-          if(strncmp(fileString + blocks[bIndex].idStart, fileString + blocks[blockIndex].idStart, blocks[blockIndex].idLength) == 0){
+        int startIndex = blockIndex - 100;
+        int endIndex = blockIndex + 100;
+        occurences++;
+        if(startIndex < 0){
+          startIndex = 0;
+        }
+        if(endIndex == blockCount){
+          endIndex = blockCount;
+        }
+      
+        for(int bIndex = startIndex; bIndex < endIndex; bIndex++){
+          if(bIndex != blockIndex){
+            if(strncmp(fileString + blocks[bIndex].idStart, fileString + blocks[blockIndex].idStart, blocks[blockIndex].idLength) == 0){
+              printBlock(fileString, blocks, bIndex);
+            }
+          }
+          else{
             printBlock(fileString, blocks, bIndex);
           }
         }
-        else{
-          printBlock(fileString, blocks, bIndex);
-        }
+        markRequestPrinted(requestsPrinted, fileString + blocks[blockIndex].idStart, blocks[blockIndex].idLength);
       }
     }
   }
