@@ -104,55 +104,32 @@ char *sstrnstr(char *haystack, char *needle, size_t haylen){
 
 int getDateAsTimestamp(char *dateCharStart){
   tm dateThing;
-  dateThing.tm_year = 0;
-  dateThing.tm_mon = 0;
-  dateThing.tm_mday = 0;
-  dateThing.tm_hour = 0;
-  dateThing.tm_min = 0;
-  dateThing.tm_sec = 0;
+  int dateStringLength = 19;
+  int currentIndex = 0;
+  int currentNumberIndex = 0;
+  int numbers[6] = {0};
 
-  dateThing.tm_year += 1000 * (*dateCharStart - '0');
-  dateCharStart++;
-  dateThing.tm_year += 100 * (*(dateCharStart) - '0');
-  dateCharStart++;
-  dateThing.tm_year += 10 * (*(dateCharStart) - '0');
-  dateCharStart++;
-  dateThing.tm_year += 1 * (*(dateCharStart) - '0');
-  dateCharStart++;
-  //Skip past the '-'
-  dateCharStart++;
+  for(currentIndex = 0; currentIndex < dateStringLength; currentIndex++){
+    char currentChar = *(dateCharStart + currentIndex);
+    if(currentChar == '-' || currentChar == ' ' || currentChar == ':'){
+      currentNumberIndex++;
+      continue;
+    }
+    else{
+      numbers[currentNumberIndex] *= 10;
+      numbers[currentNumberIndex] += currentChar - '0';
+    }
+  }
 
-  dateThing.tm_mon += 10 * (*dateCharStart - '0');
-  dateCharStart++;
-  dateThing.tm_mon += 1 * (*dateCharStart - '0');
-  dateCharStart++;
-  dateCharStart++;
+  //Year is years from 1900 eg 2016 -> 116
+  dateThing.tm_year = numbers[0] - 1900;
+  //Month is the months zero based (0-11)
+  dateThing.tm_mon  = numbers[1] - 1;
+  dateThing.tm_mday = numbers[2];
+  dateThing.tm_hour = numbers[3];
+  dateThing.tm_min  = numbers[4];
+  dateThing.tm_sec  = numbers[5];
 
-  dateThing.tm_mday += 10 * (*dateCharStart - '0');
-  dateCharStart++;
-  dateThing.tm_mday += 1 * (*dateCharStart - '0');
-  dateCharStart++;
-  dateCharStart++;
-
-  dateThing.tm_hour += 10 * (*dateCharStart - '0');
-  dateCharStart++;
-  dateThing.tm_hour += 1 * (*dateCharStart - '0');
-  dateCharStart++;
-  dateCharStart++;
-
-  dateThing.tm_min += 10 * (*dateCharStart - '0');
-  dateCharStart++;
-  dateThing.tm_min += 1 * (*dateCharStart - '0');
-  dateCharStart++;
-  dateCharStart++;
-
-  dateThing.tm_sec += 10 * (*dateCharStart - '0');
-  dateCharStart++;
-  dateThing.tm_sec += 1 * (*dateCharStart - '0');
-  dateCharStart++;
-  dateCharStart++;
-
-  dateThing.tm_year = dateThing.tm_year - 1900;
   return (int)mktime(&dateThing);
 
 }
@@ -178,7 +155,7 @@ bool isRequestPrinted(bool *table, char *id, int idLength){
 }
 
 int main(int argc, char* argv[]){
-
+  int numberOfStringsToSearch = argc - 2;
   char *filename = argv[1];
   char *searchPattern = argv[2];
   int searchPatternLength = strlen(searchPattern);
@@ -187,7 +164,7 @@ int main(int argc, char* argv[]){
   FILE *file = fopen(filename, "r");
   block *blocks = (block*)malloc(sizeof(block) * TOTAL_BLOCK_STORAGE);
 
-  if(argc != 3){
+  if(argc < 3){
     printf("Not enough arguments\n");
     return 0;
   }
@@ -252,36 +229,41 @@ int main(int argc, char* argv[]){
   }
   int occurences = 0;
   bool requestsPrinted[TOTAL_BLOCK_STORAGE] = {0};
+  
   for(int blockIndex = 0; blockIndex < blockCount; blockIndex++){
-    char *stringStart = &fileString[blocks[blockIndex].fileStart];
-    int blockLength = blocks[blockIndex].fileEnd - blocks[blockIndex].fileStart;
-    if(sstrnstr(stringStart, searchPattern, blockLength)){
-      if(!isRequestPrinted(requestsPrinted, fileString + blocks[blockIndex].idStart, blocks[blockIndex].idLength)){
-        printf("------ REQUEST --------\n");
+    for(int searchStringIndex = 0; searchStringIndex < numberOfStringsToSearch; searchStringIndex++){
+      char *searchPattern = argv[searchStringIndex + 2];
+      char *stringStart = &fileString[blocks[blockIndex].fileStart];
+      int blockLength = blocks[blockIndex].fileEnd - blocks[blockIndex].fileStart;
+      if(sstrnstr(stringStart, searchPattern, blockLength)){
+        if(!isRequestPrinted(requestsPrinted, fileString + blocks[blockIndex].idStart, blocks[blockIndex].idLength)){
+          printf("------ REQUEST --------\n");
 
-        int startIndex = blockIndex - 100;
-        int endIndex = blockIndex + 100;
-        occurences++;
-        if(startIndex < 0){
-          startIndex = 0;
-        }
-        if(endIndex == blockCount){
-          endIndex = blockCount;
-        }
-      
-        for(int bIndex = startIndex; bIndex < endIndex; bIndex++){
-          if(bIndex != blockIndex){
-            if(strncmp(fileString + blocks[bIndex].idStart, fileString + blocks[blockIndex].idStart, blocks[blockIndex].idLength) == 0){
+          int startIndex = blockIndex - 100;
+          int endIndex = blockIndex + 100;
+          occurences++;
+          if(startIndex < 0){
+            startIndex = 0;
+          }
+          if(endIndex == blockCount){
+            endIndex = blockCount;
+          }
+        
+          for(int bIndex = startIndex; bIndex < endIndex; bIndex++){
+            if(bIndex != blockIndex){
+              if(strncmp(fileString + blocks[bIndex].idStart, fileString + blocks[blockIndex].idStart, blocks[blockIndex].idLength) == 0){
+                printBlock(fileString, blocks, bIndex);
+              }
+            }
+            else{
               printBlock(fileString, blocks, bIndex);
             }
           }
-          else{
-            printBlock(fileString, blocks, bIndex);
-          }
+          markRequestPrinted(requestsPrinted, fileString + blocks[blockIndex].idStart, blocks[blockIndex].idLength);
         }
-        markRequestPrinted(requestsPrinted, fileString + blocks[blockIndex].idStart, blocks[blockIndex].idLength);
       }
     }
+    
   }
   free(blocks);
   free(fileString);
