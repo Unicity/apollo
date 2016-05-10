@@ -1,0 +1,1 @@
+cl /Febuild\apollo.exe /O2 apollo.cpp
