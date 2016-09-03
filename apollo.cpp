@@ -203,29 +203,15 @@ int main(int argc, char* argv[]){
     }
     filesize = fread(fileString, sizeof(char), BUFF_SIZE, stdin);
     fileString = (char*)realloc(fileString, filesize);
-    #if 0
-    while(fread(buffer, sizeof(char), BUFF_SIZE, stdin)){
-      char *old = fileString;
-      u64 diff = contentSize/BUFF_SIZE;
-      //printf("%d, %llu\n", contentSize, diff);
-      int buffSize = strlen(buffer);
-      contentSize += buffSize;
-      printf("%d\n", contentSize);
-      fileString = (char*)realloc(fileString, contentSize);
-      if(!fileString){
-        printf("couldnt allocate space for the file");
-        return 1;
-      }
-      strcat(fileString, buffer);
-    }
-    #endif
   }
   int fileIndex = 0;
   int begin = 0;
   int end = 0;
   strang_ = fileString[fileIndex];
-  block *requests[10] = {0};
+  block *requests[5000] = {0};
   int requestIndex = 0;
+  block *blockStorage = (block *)malloc(sizeof(block) * 500);
+  int blockIndex = 0;
   while(fileIndex < filesize){
     int tempIndex = fileIndex;
     if(strang_ == '[' && fileString[fileIndex+1] == ']' && fileString[fileIndex + 2] == '\n'){
@@ -237,7 +223,11 @@ int main(int argc, char* argv[]){
         end++;
       }
       if(end - begin > 1){
-        block *newBlock = (block *)malloc(sizeof(block));
+        block *newBlock = blockStorage + blockIndex;
+        blockIndex++;
+        if(blockIndex == 500){
+          blockIndex = 0;
+        }
         if(!newBlock){
           printf("bad alloc\n");
           return 1;
@@ -263,21 +253,28 @@ int main(int argc, char* argv[]){
           int startIndex;
           block *cur;
           //find the very start of the request
-          for(int ri =0; ri<requestIndex; ri++){
-            if(!requests[ri])break;
-            if(strncmp(fileString + requests[ri]->idStart, fileString + newBlock->idStart, newBlock->idLength) == 0){
-              start = requests[ri];
-              startIndex = ri;
-              break;
-            }
-          }
-          //Add ourselves to the end of the list
 
+            for(int ri =0; ri<requestIndex; ri++){
+              if(strncmp(fileString + requests[ri]->idStart, fileString + newBlock->idStart, newBlock->idLength) == 0){
+                start = requests[ri];
+                startIndex = ri;
+                break;
+              }
+            }
+
+          //Add ourselves to the end of the list
           cur = start;
-          while(cur->next){
-            cur = cur->next;
+          if(!start){
+            start = newBlock;
+            requests[requestIndex] = newBlock;
+            requestIndex++;
           }
-          cur->next = newBlock;
+          else{
+            while(cur->next){
+              cur = cur->next;
+            }
+            cur->next = newBlock;
+          }
 
           if(sstrnstr(stringStart, "Script stop [] []", blockLength)){
             //Means we hit the end of a request
@@ -315,7 +312,7 @@ int main(int argc, char* argv[]){
               start = start->next;
               free(temp);
             }
-            #endif  
+            #endif
             requests[startIndex] = 0;
             requestIndex--;
             block *temp = requests[requestIndex];
@@ -326,6 +323,9 @@ int main(int argc, char* argv[]){
         else{
           requests[requestIndex] = newBlock;
           requestIndex++;
+          if(requestIndex == 5000){
+            requestIndex = 0;
+          }
         }
           
       }
