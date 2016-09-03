@@ -17,20 +17,25 @@
 #include <string.h>
 #include <stdlib.h> 
 #include <time.h>
+#include <stdint.h>
 
+typedef uint64_t u64;
+typedef int64_t s64;
 //#include "strptime.h"
 /*
   WHOO!
 */
 //char *strptime(const char * __restrict, const char * __restrict, struct tm * __restrict);
 
-#define TOTAL_BLOCK_STORAGE 500000
+#define TOTAL_BLOCK_STORAGE 700000
+const u64 BUFF_SIZE = (u64)1024*1024*1024*4;
 struct block {
   int fileStart;
   int fileEnd;
   int idStart;
   int idLength;
   int date;
+  block * next;
 };
 
 bool isWhitespace(char ch){
@@ -108,7 +113,6 @@ int getDateAsTimestamp(char *dateCharStart){
   int currentIndex = 0;
   int currentNumberIndex = 0;
   int numbers[6] = {0};
-
   for(currentIndex = 0; currentIndex < dateStringLength; currentIndex++){
     char currentChar = *(dateCharStart + currentIndex);
     if(currentChar == '-' || currentChar == ' ' || currentChar == ':'){
@@ -120,7 +124,6 @@ int getDateAsTimestamp(char *dateCharStart){
       numbers[currentNumberIndex] += currentChar - '0';
     }
   }
-
   //Year is years from 1900 eg 2016 -> 116
   dateThing.tm_year = numbers[0] - 1900;
   //Month is the months zero based (0-11)
@@ -134,8 +137,8 @@ int getDateAsTimestamp(char *dateCharStart){
 
 }
 
-void printBlock(char* fileString, block *blocks, int blockIndex){
-  printf("%.*s\n", blocks[blockIndex].fileEnd - blocks[blockIndex].fileStart, fileString + blocks[blockIndex].fileStart);
+void printBlock(char* fileString, block *b){
+  printf("%.*s\n", b->fileEnd - b->fileStart, fileString + b->fileStart);
 }
 
 int hash(char* string, int len){
@@ -155,71 +158,177 @@ bool isRequestPrinted(bool *table, char *id, int idLength){
 }
 
 int main(int argc, char* argv[]){
-  int numberOfStringsToSearch = argc - 2;
-  char *filename = argv[1];
-  char *searchPattern = argv[2];
-  int searchPatternLength = strlen(searchPattern);
+  int numberOfStringsToSearch = 0;
+  char *searchPattern;
+  int searchPatternLength = 0;
   char strang_;
   int blockCount = 0;
-  FILE *file = fopen(filename, "r");
-  block *blocks = (block*)malloc(sizeof(block) * TOTAL_BLOCK_STORAGE);
-
-  if(argc < 3){
-    printf("Not enough arguments\n");
-    return 0;
+  char *fileName = 0;
+  u64 filesize = 0;
+  char *searchStrings[50];
+  char *fileString = 0;
+  for(int i=1; i<argc; i++){
+    if(argv[i][0] == '-' && argv[i][1] == 'f'){
+      fileName = argv[i+1];
+      i++;
+    }
+    else{
+      searchStrings[numberOfStringsToSearch] = argv[i];
+      numberOfStringsToSearch++;
+    }
+  }
+  if(!numberOfStringsToSearch){
+    printf("no search pattern\n");
+    return 1;
   }
 
-  if(!blocks){
-    printf("couldn't get block storage\n");
-    return 0;
-  }
 
-  if(!file){
-    printf("couldn't open file");
-    return 0;
+  if(fileName){
+    FILE *file = fopen(fileName, "r");
+    fseek(file, 0, SEEK_END);
+    filesize = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    fileString = (char *)malloc(sizeof(char) * filesize);
+    if(!fileString){
+      printf("Couldnt allocate space for the file");
+      return 0;
+    }
+    fread(fileString, sizeof(char), filesize, file);
   }
-
-  
-  fseek(file, 0, SEEK_END);
-  int filesize = ftell(file);
-  fseek(file, 0, SEEK_SET);
-  int begin = ftell(file);
-  int end = 0;
-  char* fileString = (char *)malloc(sizeof(char) * filesize);
-  if(!fileString){
-    printf("Couldnt allocate space for the file");
-    return 0;
+  else{
+    fileString = (char*)malloc(sizeof(char) * BUFF_SIZE);
+    if(!fileString){
+      printf("couldnt allocate space for the file");
+      return 1;
+    }
+    filesize = fread(fileString, sizeof(char), BUFF_SIZE, stdin);
+    fileString = (char*)realloc(fileString, filesize);
+    #if 0
+    while(fread(buffer, sizeof(char), BUFF_SIZE, stdin)){
+      char *old = fileString;
+      u64 diff = contentSize/BUFF_SIZE;
+      //printf("%d, %llu\n", contentSize, diff);
+      int buffSize = strlen(buffer);
+      contentSize += buffSize;
+      printf("%d\n", contentSize);
+      fileString = (char*)realloc(fileString, contentSize);
+      if(!fileString){
+        printf("couldnt allocate space for the file");
+        return 1;
+      }
+      strcat(fileString, buffer);
+    }
+    #endif
   }
-  fread(fileString, sizeof(char), filesize, file);
   int fileIndex = 0;
+  int begin = 0;
+  int end = 0;
   strang_ = fileString[fileIndex];
-  begin = 0;
-  while(fileIndex < filesize && blockCount < TOTAL_BLOCK_STORAGE){
+  block *requests[10] = {0};
+  int requestIndex = 0;
+  while(fileIndex < filesize){
     int tempIndex = fileIndex;
-    if(strang_ == '[' && fileString[fileIndex+1] == ']' && fileString[fileIndex + 2] == '\n'){ 
+    if(strang_ == '[' && fileString[fileIndex+1] == ']' && fileString[fileIndex + 2] == '\n'){
       end = fileIndex + 2;
-      while(isWhitespace(fileString[end])){
+      while(begin < filesize && fileString[begin] != '['){
+        begin++;
+      }
+      while(end < filesize && isWhitespace(fileString[end])){
         end++;
       }
       if(end - begin > 1){
-        blocks[blockCount].fileStart = begin;
-        blocks[blockCount].fileEnd = end;
+        block *newBlock = (block *)malloc(sizeof(block));
+        if(!newBlock){
+          printf("bad alloc\n");
+          return 1;
+        }
+        newBlock->next = 0;
+        newBlock->fileStart = begin;
+        newBlock->fileEnd = end;
         char *tempChar = fileString + begin;
         while(*tempChar != ']'){
           tempChar++;          
         }
-        
-        blocks[blockCount].date = getDateAsTimestamp(fileString + begin + 1);
-        blocks[blockCount].idStart = tempChar - fileString;
+        newBlock->date = getDateAsTimestamp(fileString + begin + 1);
+        newBlock->idStart = tempChar - fileString;
         while(*tempChar != '.'){
           tempChar++;
         }
-        blocks[blockCount].idLength = (tempChar - fileString) - blocks[blockCount].idStart;
+        newBlock->idLength = (tempChar - fileString) - newBlock->idStart;
 
-        blockCount++;
+        char *stringStart = &fileString[newBlock->fileStart];
+        int blockLength = newBlock->fileEnd - newBlock->fileStart;
+        if(!sstrnstr(stringStart, "Script start [] []", blockLength)){
+          block *start;
+          int startIndex;
+          block *cur;
+          //find the very start of the request
+          for(int ri =0; ri<requestIndex; ri++){
+            if(!requests[ri])break;
+            if(strncmp(fileString + requests[ri]->idStart, fileString + newBlock->idStart, newBlock->idLength) == 0){
+              start = requests[ri];
+              startIndex = ri;
+              break;
+            }
+          }
+          //Add ourselves to the end of the list
+
+          cur = start;
+          while(cur->next){
+            cur = cur->next;
+          }
+          cur->next = newBlock;
+
+          if(sstrnstr(stringStart, "Script stop [] []", blockLength)){
+            //Means we hit the end of a request
+            bool match = false;
+            //see if any block matches any of our search strings
+            cur = start;
+            while(cur){
+              char *stringStart = &fileString[cur->fileStart];
+              int blockLength = cur->fileEnd - cur->fileStart;
+              for(int searchStringIndex = 0; searchStringIndex < numberOfStringsToSearch; searchStringIndex++){
+                char *searchPattern = searchStrings[searchStringIndex];
+                if(sstrnstr(stringStart, searchPattern, blockLength)){
+                  match = true;
+                  break;
+                }
+              }
+              if(match){
+                break;
+              }
+              cur = cur->next;
+            }
+            //if we have a match print the request
+            if(match){
+              printf("------ REQUEST --------\n");
+              cur = start;
+              while(cur){
+                printBlock(fileString, cur);
+                cur = cur->next;
+              }
+            }
+            //Remove our request from the requests array
+            #if 0
+            while(start){
+              block* temp = start;
+              start = start->next;
+              free(temp);
+            }
+            #endif  
+            requests[startIndex] = 0;
+            requestIndex--;
+            block *temp = requests[requestIndex];
+            requests[requestIndex] = 0;
+            requests[startIndex] = temp;
+          }
+        }
+        else{
+          requests[requestIndex] = newBlock;
+          requestIndex++;
+        }
+          
       }
-             
-
       begin = end;
       fileIndex += 2;
     }
@@ -227,47 +336,7 @@ int main(int argc, char* argv[]){
     strang_ = fileString[fileIndex];
 
   }
-  int occurences = 0;
-  bool requestsPrinted[TOTAL_BLOCK_STORAGE] = {0};
-  
-  for(int blockIndex = 0; blockIndex < blockCount; blockIndex++){
-    for(int searchStringIndex = 0; searchStringIndex < numberOfStringsToSearch; searchStringIndex++){
-      char *searchPattern = argv[searchStringIndex + 2];
-      char *stringStart = &fileString[blocks[blockIndex].fileStart];
-      int blockLength = blocks[blockIndex].fileEnd - blocks[blockIndex].fileStart;
-      if(sstrnstr(stringStart, searchPattern, blockLength)){
-        if(!isRequestPrinted(requestsPrinted, fileString + blocks[blockIndex].idStart, blocks[blockIndex].idLength)){
-          printf("------ REQUEST --------\n");
-
-          int startIndex = blockIndex - 100;
-          int endIndex = blockIndex + 100;
-          occurences++;
-          if(startIndex < 0){
-            startIndex = 0;
-          }
-          if(endIndex == blockCount){
-            endIndex = blockCount;
-          }
-        
-          for(int bIndex = startIndex; bIndex < endIndex; bIndex++){
-            if(bIndex != blockIndex){
-              if(strncmp(fileString + blocks[bIndex].idStart, fileString + blocks[blockIndex].idStart, blocks[blockIndex].idLength) == 0){
-                printBlock(fileString, blocks, bIndex);
-              }
-            }
-            else{
-              printBlock(fileString, blocks, bIndex);
-            }
-          }
-          markRequestPrinted(requestsPrinted, fileString + blocks[blockIndex].idStart, blocks[blockIndex].idLength);
-        }
-      }
-    }
-    
-  }
-  free(blocks);
   free(fileString);
-  printf("Occurances of string found: %i", occurences);
   
 
 }
